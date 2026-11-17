@@ -3,6 +3,7 @@ import Performance from "./Performance.js";
 import Booking from "./Booking.js";
 import Venue from "./Venue.js";
 import TicketType from "./TicketType.js";
+import SeatOccupancy from "./SeatOccupancy.js";
 
 Performance.belongsTo(Venue, { foreignKey: "venueId", as: "venue" });
 Venue.hasMany(Performance, { foreignKey: "venueId", as: "performances" });
@@ -16,7 +17,10 @@ Booking.belongsTo(Performance, {
 });
 Performance.hasMany(Booking, { foreignKey: "performanceId", as: "bookings" });
 
-export { User, Performance, Booking, Venue, TicketType };
+SeatOccupancy.belongsTo(Booking, { foreignKey: "bookingId", as: "booking" });
+Booking.hasMany(SeatOccupancy, { foreignKey: "bookingId", as: "seatOccupancies" });
+
+export { User, Performance, Booking, Venue, TicketType, SeatOccupancy };
 
 export default {
   User,
@@ -24,4 +28,5 @@ export default {
   Booking,
   Venue,
   TicketType,
+  SeatOccupancy,
 };

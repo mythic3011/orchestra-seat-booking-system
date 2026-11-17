@@ -29,6 +29,7 @@ import {
   NEW_BOOKING_STATUS,
   NEW_BOOKING_PAYMENT_STATUS,
 } from "./helpers/bookingPricing.js";
+import { claimSeatOccupancies, releaseSeatOccupancies } from "./helpers/seatOccupancy.js";
 import {
   validateSeatTicketStructure,
   parseSeatId,
@@ -232,119 +233,137 @@ export const createBooking = async (bookingData, userId) => {
     seatTicketsCount: finalSeatTickets.length,
   });
 
-  const availability = await getPerformanceAvailability(performanceId, showtimeId);
-
-  logger.debug("Checking seat availability", {
-    performanceId,
-    showtimeId,
-    requestedSeats: finalSeatTickets.length,
-    availableSeats: availability.availableSeats,
-    totalSeats: availability.totalSeats,
-    bookedSeats: availability.bookedSeats,
-  });
-
-  if (availability.availableSeats < finalSeatTickets.length) {
-    logger.error("Not enough seats available", {
-      performanceId,
-      showtimeId,
-      requestedSeats: finalSeatTickets.length,
-      availableSeats: availability.availableSeats,
+  const booking = await sequelize.transaction(async (transaction) => {
+    await Performance.findByPk(performanceId, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
     });
-    throw new BadRequestError("Not enough seats available");
-  }
 
-  // Check for already booked seats
-  const existingBookings = await Booking.findAll({
-    where: {
-      performanceId,
-      showtimeId,
-      status: { [Op.in]: ["confirmed", "pending"] },
-    },
-    attributes: ["seats", "seatTickets"],
-  });
+      const availability = await getPerformanceAvailability(performanceId, showtimeId);
 
-  const bookedSeatIds = new Set();
-  for (const booking of existingBookings) {
-    // Check both old format (seats) and new format (seatTickets)
-    if (booking.seatTickets && Array.isArray(booking.seatTickets)) {
-      for (const seatTicket of booking.seatTickets) {
-        if (seatTicket.seatId) {
-          bookedSeatIds.add(seatTicket.seatId.toLowerCase());
-        }
-      }
-    } else if (booking.seats && Array.isArray(booking.seats)) {
-      for (const seat of booking.seats) {
-        const seatId = typeof seat === "string" ? seat : seat.fullId || seat.seatId;
-        if (seatId) {
-          bookedSeatIds.add(seatId.toLowerCase());
-        }
-      }
-    }
-  }
-
-  for (const seatTicket of finalSeatTickets) {
-    if (bookedSeatIds.has(seatTicket.seatId.toLowerCase())) {
-      logger.error("Seat already booked", {
+      logger.debug("Checking seat availability", {
         performanceId,
         showtimeId,
-        seatId: seatTicket.seatId,
-        requestedSeatIds: finalSeatTickets.map(st => st.seatId),
-        bookedSeatIds: Array.from(bookedSeatIds),
+        requestedSeats: finalSeatTickets.length,
+        availableSeats: availability.availableSeats,
+        totalSeats: availability.totalSeats,
+        bookedSeats: availability.bookedSeats,
       });
-      throw new BadRequestError(`Seat ${seatTicket.seatId} is already booked`);
-    }
-  }
 
-  logger.debug("All validation checks passed, creating booking", {
-    performanceId,
-    showtimeId,
-    userId,
-    seatCount: finalSeatTickets.length,
-    totalAmount,
-  });
+      if (availability.availableSeats < finalSeatTickets.length) {
+        logger.error("Not enough seats available", {
+          performanceId,
+          showtimeId,
+          requestedSeats: finalSeatTickets.length,
+          availableSeats: availability.availableSeats,
+        });
+        throw new BadRequestError("Not enough seats available");
+      }
 
-  const booking = await Booking.create({
-    bookingReference: generateBookingReference(),
-    userId,
-    userName: user.name,
-    userEmail: user.email,
-    performanceId,
-    performanceTitle: performance.title,
-    venueId: performance.venueId,
-    venueName: performance.venueName,
-    showtimeId,
-    showtime: showtimeId
-      ? performance.showtimes?.find((st) => st.id === showtimeId)?.dateTime
-      : performance.date,
-    seats: resolvedSeats,
-    seatTickets: finalSeatTickets,
-    seatCount: finalSeatTickets.length,
-    amount: totalAmount,
-    totalAmount: totalAmount,
-    bookingDate: new Date(),
-    status: NEW_BOOKING_STATUS,
-    paymentMethod,
-    paymentStatus: NEW_BOOKING_PAYMENT_STATUS,
-    customerInfo,
-  });
+      // Check for already booked seats
+      const existingBookings = await Booking.findAll({
+        where: {
+          performanceId,
+          showtimeId,
+          status: { [Op.in]: ["confirmed", "pending"] },
+        },
+        attributes: ["seats", "seatTickets"],
+        transaction,
+      });
 
-  logger.info("Booking created successfully", {
-    bookingId: booking.id,
-    bookingReference: booking.bookingReference,
-    performanceId,
-    showtimeId,
-    userId,
-    seatCount: finalSeatTickets.length,
-    totalAmount,
-    paymentMethod,
-  });
+      const bookedSeatIds = new Set();
+      for (const booking of existingBookings) {
+        // Check both old format (seats) and new format (seatTickets)
+        if (booking.seatTickets && Array.isArray(booking.seatTickets)) {
+          for (const seatTicket of booking.seatTickets) {
+            if (seatTicket.seatId) {
+              bookedSeatIds.add(seatTicket.seatId.toLowerCase());
+            }
+          }
+        } else if (booking.seats && Array.isArray(booking.seats)) {
+          for (const seat of booking.seats) {
+            const seatId = typeof seat === "string" ? seat : seat.fullId || seat.seatId;
+            if (seatId) {
+              bookedSeatIds.add(seatId.toLowerCase());
+            }
+          }
+        }
+      }
 
-  await updatePerformanceAvailability(performanceId);
-  await updatePerformanceStatusByAvailability(performanceId);
+      for (const seatTicket of finalSeatTickets) {
+        if (bookedSeatIds.has(seatTicket.seatId.toLowerCase())) {
+          logger.error("Seat already booked", {
+            performanceId,
+            showtimeId,
+            seatId: seatTicket.seatId,
+            requestedSeatIds: finalSeatTickets.map(st => st.seatId),
+            bookedSeatIds: Array.from(bookedSeatIds),
+          });
+          throw new BadRequestError(`Seat ${seatTicket.seatId} is already booked`);
+        }
+      }
 
-  logger.debug("Performance availability updated after booking", {
-    bookingId: booking.id,
-    performanceId,
+      logger.debug("All validation checks passed, creating booking", {
+        performanceId,
+        showtimeId,
+        userId,
+        seatCount: finalSeatTickets.length,
+        totalAmount,
+      });
+
+      const created = await Booking.create({
+        bookingReference: generateBookingReference(),
+        userId,
+        userName: user.name,
+        userEmail: user.email,
+        performanceId,
+        performanceTitle: performance.title,
+        venueId: performance.venueId,
+        venueName: performance.venueName,
+        showtimeId,
+        showtime: showtimeId
+          ? performance.showtimes?.find((st) => st.id === showtimeId)?.dateTime
+          : performance.date,
+        seats: resolvedSeats,
+        seatTickets: finalSeatTickets,
+        seatCount: finalSeatTickets.length,
+        amount: totalAmount,
+        totalAmount: totalAmount,
+        bookingDate: new Date(),
+        status: NEW_BOOKING_STATUS,
+        paymentMethod,
+        paymentStatus: NEW_BOOKING_PAYMENT_STATUS,
+        customerInfo,
+      }, { transaction });
+
+      await claimSeatOccupancies({
+        performanceId,
+        showtimeId,
+        seatIds: finalSeatTickets.map((ticket) => ticket.seatId),
+        bookingId: created.id,
+        transaction,
+      });
+
+      logger.info("Booking created successfully", {
+        bookingId: created.id,
+        bookingReference: created.bookingReference,
+        performanceId,
+        showtimeId,
+        userId,
+        seatCount: finalSeatTickets.length,
+        totalAmount,
+        paymentMethod,
+      });
+
+      await updatePerformanceAvailability(performanceId);
+      await updatePerformanceStatusByAvailability(performanceId);
+
+      logger.debug("Performance availability updated after booking", {
+        bookingId: created.id,
+        performanceId,
+      });
+
+      return created;
   });
 
   return booking;
@@ -489,6 +508,10 @@ export const updateBooking = async (id, updates, userId = null, isAdmin = false)
   }
 
   await booking.update(updates);
+
+  if (updates.status === "cancelled") {
+    await releaseSeatOccupancies({ bookingId: booking.id });
+  }
 
   if (updates.status === "cancelled" || updates.status === "confirmed") {
     await updatePerformanceAvailability(booking.performanceId);
