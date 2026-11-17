@@ -7,7 +7,8 @@ import {
   getVirtualizationThreshold,
   getSeatStatusOpacity,
 } from "@utils/colors.js";
-import { generateFullId } from "@utils/seatIdHelper.js";
+import { generateFullId, displayedSeatNumber, shouldOmitSeatIndex } from "@utils/seatIdHelper.js";
+import { extractAislePattern as extractAislePatternFromLayout, calculateSeatPosition as calculateSeatPositionFromLayout } from "./aisleLayout.js";
 
 import { initializeSeatDetails } from "./seatUtils.js";
 
@@ -110,7 +111,7 @@ export const seatMapGenerator = {
         .sort((a, b) => a.position - b.position);
       const aislePattern = this.extractAislePattern(
         section,
-        verticalAisles.map((a) => a.position)
+        verticalAisles
       );
       const verticalAisleWidths = verticalAisles.map((a) => a.width);
 
@@ -162,32 +163,7 @@ export const seatMapGenerator = {
   },
 
   extractAislePattern(section, rawAisles) {
-    const verticalAisles = rawAisles
-      .filter((a) => a && a.type === "vertical")
-      .map((a) =>
-        a.position !== undefined
-          ? a.position
-          : a.afterSeat !== undefined
-            ? a.afterSeat
-            : 0
-      )
-      .sort((a, b) => a - b);
-
-    if (verticalAisles.length === 0) {
-      return [section.seatsPerRow];
-    }
-
-    const pattern = [];
-    let lastPos = 0;
-
-    verticalAisles.forEach((aislePos) => {
-      pattern.push(aislePos - lastPos);
-      lastPos = aislePos;
-    });
-
-    pattern.push(section.seatsPerRow - lastPos);
-
-    return pattern;
+    return extractAislePatternFromLayout(section, rawAisles);
   },
 
   calculateTotalWidth(
@@ -207,28 +183,12 @@ export const seatMapGenerator = {
     verticalAisleWidths,
     startX
   ) {
-    let currentSeatInPattern = seatNum;
-    let seatsBefore = 0;
-    let patternIndex = 0;
-
-    for (let i = 0; i < aislePattern.length; i++) {
-      if (currentSeatInPattern <= aislePattern[i]) {
-        patternIndex = i;
-        break;
-      } else {
-        currentSeatInPattern -= aislePattern[i];
-        seatsBefore += aislePattern[i];
-      }
-    }
-
-    const aisleOffset = verticalAisleWidths
-      .slice(0, patternIndex)
-      .reduce((s, w) => s + w, 0);
-    return (
-      startX +
-      seatsBefore * spacingX +
-      aisleOffset +
-      (seatNum - seatsBefore - 1) * spacingX
+    return calculateSeatPositionFromLayout(
+      seatNum,
+      aislePattern,
+      spacingX,
+      verticalAisleWidths,
+      startX
     );
   },
 
@@ -307,9 +267,9 @@ export const seatMapGenerator = {
             globalDirection: "L_TO_R",
             startNumber: 1,
           };
-          const skipIndices = numbering.skipSeatIndices || [];
-          if (skipIndices.includes(seatIndex)) {continue;}
-          const seatNumber = seatIndex + 1;
+          if (shouldOmitSeatIndex(numbering, seatIndex)) {continue;}
+          const seatNumber = displayedSeatNumber(numbering, seatIndex);
+          const columnNumber = seatIndex + 1;
           const seatLabel = this.computeSeatLabel(section, rowIndex, seatIndex);
           if (!seatLabel) {continue;}
           const seatId = `${rowLabel}${seatLabel}`;
@@ -326,7 +286,7 @@ export const seatMapGenerator = {
           const isSelected =
             selectedSeats.includes(fullId) || selectedSeats.includes(seatId);
           const seatX = this.calculateSeatPosition(
-            seatNumber,
+            columnNumber,
             aislePattern,
             spacingX,
             verticalAisleWidths,
@@ -460,12 +420,12 @@ export const seatMapGenerator = {
             globalDirection: "L_TO_R",
             startNumber: 1,
           };
-          const skipIndices = numbering.skipSeatIndices || [];
-          if (skipIndices.includes(seatIndex)) {
+          if (shouldOmitSeatIndex(numbering, seatIndex)) {
             continue;
           }
 
-          const seatNumber = seatIndex + 1;
+          const seatNumber = displayedSeatNumber(numbering, seatIndex);
+          const columnNumber = seatIndex + 1;
           const seatLabel = this.computeSeatLabel(section, rowIndex, seatIndex);
 
           if (seatLabel) {
@@ -484,7 +444,7 @@ export const seatMapGenerator = {
               selectedSeats.includes(fullId) || selectedSeats.includes(seatId);
 
             const seatX = this.calculateSeatPosition(
-              seatNumber,
+              columnNumber,
               aislePattern,
               spacingX,
               verticalAisleWidths,
