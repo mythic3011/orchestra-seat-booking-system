@@ -6,9 +6,10 @@ import { bookingService } from "@services/bookingService.js";
 import { performanceService } from "@services/performanceService.js";
 import { storage } from "@services/storageService.js";
 import { formatCurrency } from "@utils/utils.js";
+import { bookingOutcomeCopy } from "@utils/booking/bookingStatusCopy.js";
 
 export default {
-  title: "Booking Confirmed | User",
+  title: "Booking | User",
   bookingData: null,
   performanceData: null,
 
@@ -56,6 +57,8 @@ export default {
       return this.renderSimpleConfirmation();
     }
 
+    const outcome = bookingOutcomeCopy(this.bookingData);
+    this.title = outcome.documentTitle;
     const bookingRef = this.bookingData.bookingReference || this.bookingData.id;
     const performanceTitle = this.performanceData?.title || "Performance";
     const performanceDate = this.performanceData?.date
@@ -71,8 +74,8 @@ export default {
           <div class="w-20 h-20 bg-white bg-opacity-20 rounded-full flex items-center justify-center mb-4 mx-auto shadow-lg">
             <i class="fas fa-check text-5xl"></i>
           </div>
-          <h1 class="text-4xl font-bold mb-2">Booking Confirmed</h1>
-          <p class="text-green-100 text-lg">Your seats have been reserved successfully</p>
+          <h1 class="text-4xl font-bold mb-2">${outcome.title}</h1>
+          <p class="text-green-100 text-lg">${outcome.body}</p>
         </div>
 
         <div class="px-8 py-8 space-y-6">
@@ -174,14 +177,16 @@ export default {
   },
 
   renderSimpleConfirmation() {
+    const outcome = bookingOutcomeCopy({ status: "pending", paymentStatus: "pending" });
+    this.title = outcome.documentTitle;
     return `
       <div class="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
         <div class="bg-green-600 text-white px-8 py-16 text-center border-b-4 border-green-700">
           <div class="w-24 h-24 bg-white bg-opacity-20 rounded-full flex items-center justify-center mb-6 mx-auto shadow-lg">
             <i class="fas fa-check text-6xl"></i>
           </div>
-          <h1 class="text-4xl font-bold mb-3">Booking Confirmed</h1>
-          <p class="text-green-100 text-lg">Your booking has been successfully confirmed</p>
+          <h1 class="text-4xl font-bold mb-3">${outcome.title}</h1>
+          <p class="text-green-100 text-lg">${outcome.body}</p>
         </div>
 
         <div class="px-8 py-12">

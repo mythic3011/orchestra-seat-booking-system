@@ -11,7 +11,12 @@
  */
 
 import { Op } from "sequelize";
-import { Performance, Venue, Booking } from "#models/index.js";
+import { Performance, Venue, Booking, SeatOccupancy } from "#models/index.js";
+import { normalizeShowtimeKey } from "./helpers/seatOccupancy.js";
+import {
+  collectOccupiedSeatIdsFromBookings,
+  mergeOccupiedSeatIds,
+} from "./helpers/occupiedSeats.js";
 import { buildSeatMapFromVenueLayout } from "#utils/seatMapBuilder.js";
 import { buildWhereClause } from "./helpers/filters.js";
 import { findEntityOrThrow } from "./helpers/entityHelpers.js";
@@ -596,21 +601,23 @@ export const getPerformanceAvailability = async (id, showtimeId = null) => {
 
   const bookings = await Booking.findAll({
     where: bookingsWhere,
-    attributes: ["seats"],
+    attributes: ["seats", "seatTickets"],
   });
 
-  const bookedSeatIds = new Set();
-
-  for (const booking of bookings) {
-    if (booking.seats && Array.isArray(booking.seats)) {
-      for (const seat of booking.seats) {
-        const seatId = typeof seat === "string" ? seat : seat.seatId;
-        if (seatId) {
-          bookedSeatIds.add(seatId);
-        }
-      }
-    }
+  const occupancyWhere = { performanceId: id };
+  if (showtimeId) {
+    occupancyWhere.showtimeKey = normalizeShowtimeKey(showtimeId);
   }
+  const occupancyRows = await SeatOccupancy.findAll({
+    where: occupancyWhere,
+    attributes: ["seatId"],
+  });
+
+  const occupiedSeatIds = mergeOccupiedSeatIds(
+    occupancyRows.map((row) => row.seatId),
+    collectOccupiedSeatIdsFromBookings(bookings)
+  );
+  const bookedSeatIds = new Set(occupiedSeatIds);
 
   let blockedSeatsCount = 0;
   if (performance.seatMap?.blockedSeats) {
@@ -638,6 +645,7 @@ export const getPerformanceAvailability = async (id, showtimeId = null) => {
     blockedSeats: blockedSeatsCount,
     availableSeats,
     availabilityPercent: Math.round(availabilityPercent * 100) / 100,
+    occupiedSeatIds,
   };
 
   availabilityCache.set(cacheKey, {

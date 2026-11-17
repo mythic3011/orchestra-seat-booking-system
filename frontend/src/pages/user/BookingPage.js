@@ -28,7 +28,8 @@ import { ZonePricing } from "@utils/booking/zonePricing.js";
 import { calculationService } from "@utils/calculations.js";
 import { SwalColors } from "@utils/colors.js";
 import { initSeatMapPanzoom } from "@utils/panzoomSeatMap.js";
-import { generateFullId, getDisplayLabel, parseSeatId, extractSection, extractRow } from "@utils/seatIdHelper.js";
+import { generateFullId, getDisplayLabel, parseSeatId, extractSection, extractRow, displayedSeatNumber, shouldOmitSeatIndex } from "@utils/seatIdHelper.js";
+import { bookingOutcomeCopy, placeBookingButtonLabel } from "@utils/booking/bookingStatusCopy.js";
 import { notify } from "@utils/ui/notification.js";
 
 export default {
@@ -338,15 +339,13 @@ export default {
             globalDirection: "L_TO_R",
             startNumber: 1,
           };
-          const skipIndices = numbering.skipSeatIndices || [];
 
           for (let row = 0; row < section.rows; row++) {
             for (let seat = 0; seat < section.seatsPerRow; seat++) {
-              if (skipIndices.includes(seat)) {continue;}
+              if (shouldOmitSeatIndex(numbering, seat)) {continue;}
 
               const rowLabel = this.computeRowLabel(section, row);
-              const startNumber = Number(numbering.startNumber || 1);
-              const seatNumber = startNumber + seat;
+              const seatNumber = displayedSeatNumber(numbering, seat);
               const sectionKey = section.name || `section-${sectionIndex}`;
               const fullId = generateFullId(sectionKey, rowLabel, seatNumber);
               if (!seatDetails[fullId]) {
@@ -495,20 +494,12 @@ export default {
 
   async getBookedSeats() {
     try {
-      const response = await bookingAPI.getAll();
-      const bookings = ResponseExtractor.extract(response, "bookings");
-      const performanceBookings = bookings.filter(
-        (b) =>
-          b.performanceId === this.performanceData.id &&
-          b.status !== "cancelled"
+      const data = await performanceService.getAvailability(
+        this.performanceData.id,
+        this.selectedShowtimeId || null
       );
-      return performanceBookings.flatMap((b) =>
-        (b.seats || []).map((seat) =>
-          typeof seat === "string"
-            ? seat
-            : seat.fullId || seat.seatId || seat.id || ""
-        )
-      );
+      const availability = data?.availability || data || {};
+      return availability.occupiedSeatIds || [];
     } catch (error) {
       console.error("Error loading booked seats:", error);
       return [];
@@ -1108,8 +1099,8 @@ export default {
                   <i class="fas fa-shield-alt text-green-600 text-lg"></i>
                 </div>
                 <div>
-                  <h4 class="text-sm font-semibold text-green-900 mb-1">Secure Payment</h4>
-                  <p class="text-xs text-green-700 leading-relaxed">Your payment information is encrypted and secure. We never store your full card details.</p>
+                  <h4 class="text-sm font-semibold text-green-900 mb-1">Demo payment step</h4>
+                  <p class="text-xs text-green-700 leading-relaxed">This is an isolated demo workflow. No payment is collected and no card charge is made.</p>
                 </div>
               </div>
             </div>
@@ -1127,7 +1118,7 @@ export default {
               class="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold py-4 px-6 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl disabled:shadow-none flex items-center justify-center gap-2"
             >
               <i class="fas fa-lock"></i>
-              <span>Pay $${totalPrice}</span>
+              <span>${placeBookingButtonLabel(totalPrice)}</span>
             </button>
 
             <button
@@ -1780,8 +1771,10 @@ export default {
         const bookingId =
           createdBooking?.bookingReference || createdBooking?.id || "";
 
-        // Add notification for logged-in users
-        if (user) {
+        const outcome = bookingOutcomeCopy(
+          createdBooking || { status: "pending", paymentStatus: "pending" }
+        );
+        if (user && outcome.notify === "confirmed") {
           const seatInfo = this.selectedSeats.length > 1
             ? `${this.selectedSeats.length} seats`
             : `Seat ${this.selectedSeats[0]}`;
@@ -1793,13 +1786,13 @@ export default {
         }
 
         Swal.fire({
-          title: "Booking Confirmed!",
+          title: `${outcome.title}`,
           html: `
           <div class="text-center space-y-4">
             <div class="text-6xl text-green-500 mb-4">
               <i class="fas fa-check-circle"></i>
             </div>
-            <p class="text-gray-700">Your booking has been confirmed!</p>
+            <p class="text-gray-700">${outcome.body}</p>
             <div class="bg-gray-100 p-4 rounded-lg">
               <p class="text-sm text-gray-600">Booking Reference</p>
               <p class="text-xl font-mono font-bold text-gray-900">${bookingId}</p>

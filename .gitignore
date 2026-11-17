@@ -113,3 +113,11 @@ pnpm-lock.yaml
 !backend/src/services/helpers/__tests__/
 !backend/src/services/helpers/__tests__/bookingPricing.test.js
 !backend/src/services/helpers/__tests__/seatOccupancy.test.js
+
+# UI-1–UI-4 regression tests must be tracked (repo historically gitignored *.test.js)
+!backend/src/services/helpers/__tests__/occupiedSeats.test.js
+!frontend/src/utils/__tests__/
+!frontend/src/utils/__tests__/layoutSeatId.test.js
+!frontend/src/utils/booking/__tests__/
+!frontend/src/utils/booking/__tests__/aisleLayout.test.js
+!frontend/src/utils/booking/__tests__/bookingStatusCopy.test.js
