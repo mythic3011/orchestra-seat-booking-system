@@ -25,6 +25,11 @@ import { buildWhereClause, applyDateRangeFilter } from "./helpers/filters.js";
 import { findEntityOrThrow } from "./helpers/entityHelpers.js";
 import { calculateTotalRevenue, groupByField } from "./helpers/statsHelpers.js";
 import {
+  applyServerAuthoritativePricing,
+  NEW_BOOKING_STATUS,
+  NEW_BOOKING_PAYMENT_STATUS,
+} from "./helpers/bookingPricing.js";
+import {
   validateSeatTicketStructure,
   parseSeatId,
   getDisplayLabel,
@@ -141,21 +146,7 @@ export const createBooking = async (bookingData, userId) => {
       }
       resolvedSeats.push(resolved);
 
-      // Calculate price using pricing calculator if not provided
-      let price = seatTicket.price;
-      if (price === undefined || price === null) {
-        try {
-          price = calculateSeatPrice(seatTicket.seatId, performance);
-        } catch (_error) {
-          price = amount ? (amount / seatTickets.length) : 500;
-        }
-      }
-
-      finalSeatTickets.push({
-        ...seatTicket,
-        price,
-        basePrice: seatTicket.basePrice || price,
-      });
+      finalSeatTickets.push({ ...seatTicket });
     }
   } else if (seats && Array.isArray(seats) && seats.length > 0) {
     logger.debug("Processing old format (seats array)", {
@@ -190,33 +181,15 @@ export const createBooking = async (bookingData, userId) => {
     finalSeatTickets = resolvedSeats.map(seat => {
       const parsed = parseSeatId(seat.fullId);
 
-      let price;
-      try {
-        price = calculateSeatPrice(seat.fullId, performance);
-      } catch (_error) {
-        price = seat.price || (amount ? (amount / resolvedSeats.length) : 500);
-      }
-
       return {
         seatId: seat.fullId,
         seatLabel: seat.label || getDisplayLabel(seat.fullId),
         ticketTypeId: seat.ticketTypeId || 'adult',
         ticketTypeName: seat.ticketTypeName || 'Adult',
-        price,
-        basePrice: seat.basePrice || price,
         section: parsed?.section,
         row: parsed?.row
       };
     });
-
-    if (!validateSeatTicketStructure(finalSeatTickets)) {
-      logger.error("Failed to transform seats to valid seatTickets structure", {
-        performanceId,
-        showtimeId,
-        transformedSeatTickets: JSON.stringify(finalSeatTickets, null, 2),
-      });
-      throw new BadRequestError("Failed to transform seats to valid seatTickets structure");
-    }
 
     logger.debug("Seats transformation successful", {
       performanceId,
@@ -233,29 +206,31 @@ export const createBooking = async (bookingData, userId) => {
     throw new BadRequestError("Either seats or seatTickets must be provided");
   }
 
-  const calculatedTotal = finalSeatTickets.reduce((sum, st) => sum + st.price, 0);
-  const totalAmount = parseFloat(calculatedTotal.toFixed(2));
+  const priced = applyServerAuthoritativePricing(
+    finalSeatTickets,
+    performance,
+    amount,
+    calculateSeatPrice
+  );
+  finalSeatTickets = priced.seatTickets;
+  const totalAmount = priced.totalAmount;
 
-  logger.debug("Calculated booking total", {
+  if (!validateSeatTicketStructure(finalSeatTickets)) {
+    logger.error("Failed to build valid seatTickets structure", {
+      performanceId,
+      showtimeId,
+      transformedSeatTickets: JSON.stringify(finalSeatTickets, null, 2),
+    });
+    throw new BadRequestError("Failed to build valid seatTickets structure");
+  }
+
+  logger.debug("Calculated booking total from server prices", {
     performanceId,
     showtimeId,
     calculatedTotal: totalAmount,
     providedAmount: amount,
     seatTicketsCount: finalSeatTickets.length,
   });
-
-  if (amount && Math.abs(totalAmount - amount) > 0.01) {
-    logger.error("Total amount mismatch", {
-      performanceId,
-      showtimeId,
-      calculatedTotal: totalAmount,
-      providedAmount: amount,
-      difference: Math.abs(totalAmount - amount),
-    });
-    throw new BadRequestError(
-      `Total amount mismatch: calculated ${totalAmount} from seatTickets, but received ${amount}`
-    );
-  }
 
   const availability = await getPerformanceAvailability(performanceId, showtimeId);
 
@@ -347,9 +322,9 @@ export const createBooking = async (bookingData, userId) => {
     amount: totalAmount,
     totalAmount: totalAmount,
     bookingDate: new Date(),
-    status: "confirmed",
+    status: NEW_BOOKING_STATUS,
     paymentMethod,
-    paymentStatus: "paid",
+    paymentStatus: NEW_BOOKING_PAYMENT_STATUS,
     customerInfo,
   });
 
