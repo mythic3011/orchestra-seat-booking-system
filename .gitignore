@@ -108,3 +108,8 @@ package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
+# P0 regression tests must be tracked (this repo historically gitignored *.test.js)
+!backend/src/services/helpers/__tests__/
+!backend/src/services/helpers/__tests__/privilegeFields.test.js
+!backend/src/services/__tests__/
+!backend/src/services/__tests__/p0-role-strip.test.js

@@ -10,9 +10,12 @@
 
 import { User } from "#models/index.js";
 import { hashPassword, comparePassword } from "#utils/hash.js";
+import { USER_ROLES, USER_STATUSES } from "#config/constants.js";
+import { ForbiddenError } from "#utils/errors.js";
 import { buildWhereClause } from "./helpers/filters.js";
 import { findEntityOrThrow, checkUniqueFields } from "./helpers/entityHelpers.js";
 import { deleteProfileImageFile } from "#utils/fileCleanup.js";
+import { stripPrivilegedUserFields, wouldDropActiveAdmin } from "./helpers/privilegeFields.js";
 
 /**
  * @param {Object} [filters={}]
@@ -90,36 +93,54 @@ export const createUser = async (userData) => {
  * @param {string} [updates.email]
  * @param {string} [updates.username]
  * @param {string} [updates.profileImage]
+ * @param {Object} [actor={}]
+ * @param {string} [actor.role]
+ * @param {string} [actor.id]
  * @returns {Promise<Object>}
  * @throws {Error}
+ * @throws {ForbiddenError} when an admin update would remove the last active admin
  */
-export const updateUser = async (id, updates) => {
+export const updateUser = async (id, updates, actor = {}) => {
   const user = await findEntityOrThrow(User, id, "User not found");
 
-  if (updates.password) {
-    updates.password = await hashPassword(updates.password);
+  const actorIsAdmin = actor.role === USER_ROLES.ADMIN;
+  const safeUpdates = actorIsAdmin
+    ? { ...updates }
+    : stripPrivilegedUserFields(updates);
+
+  if (actorIsAdmin && wouldDropActiveAdmin(user, safeUpdates)) {
+    const adminCount = await User.count({
+      where: { role: USER_ROLES.ADMIN, status: USER_STATUSES.ACTIVE },
+    });
+    if (adminCount <= 1) {
+      throw new ForbiddenError("Cannot demote or disable the last active admin");
+    }
+  }
+
+  if (safeUpdates.password) {
+    safeUpdates.password = await hashPassword(safeUpdates.password);
   }
 
   const fieldsToCheck = {};
-  if (updates.email && updates.email !== user.email) {
-    fieldsToCheck.email = updates.email;
+  if (safeUpdates.email && safeUpdates.email !== user.email) {
+    fieldsToCheck.email = safeUpdates.email;
   }
-  if (updates.username && updates.username !== user.username) {
-    fieldsToCheck.username = updates.username;
+  if (safeUpdates.username && safeUpdates.username !== user.username) {
+    fieldsToCheck.username = safeUpdates.username;
   }
 
   if (Object.keys(fieldsToCheck).length > 0) {
     await checkUniqueFields(User, fieldsToCheck, id);
   }
 
-  if (updates.profileImage && updates.profileImage !== user.profileImage) {
+  if (safeUpdates.profileImage && safeUpdates.profileImage !== user.profileImage) {
     const oldImageUrl = user.profileImage;
     if (oldImageUrl && !oldImageUrl.startsWith("data:image/")) {
       await deleteProfileImageFile(oldImageUrl);
     }
   }
 
-  await user.update(updates);
+  await user.update(safeUpdates);
 
   return user.toSafeObject();
 };

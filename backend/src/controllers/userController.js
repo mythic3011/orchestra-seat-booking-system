@@ -93,7 +93,10 @@ export const createUser = async (req, res, next) => {
  */
 export const updateUser = async (req, res, next) => {
   try {
-    const user = await userService.updateUser(req.params.id, req.body);
+    const user = await userService.updateUser(req.params.id, req.body, {
+      role: req.session?.userRole,
+      id: req.session?.userId,
+    });
 
     res.json({
       success: true,
