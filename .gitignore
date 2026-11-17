@@ -108,3 +108,7 @@ package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
+
+# P0-2 regression tests must be tracked (repo historically gitignored *.test.js)
+!backend/src/services/helpers/__tests__/
+!backend/src/services/helpers/__tests__/bookingPricing.test.js
