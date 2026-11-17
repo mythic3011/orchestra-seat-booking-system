@@ -155,3 +155,23 @@ export function parseSeatId(seatId) {
     number
   };
 }
+
+/**
+ * Displayed seat number used in fullId. Honor startNumber; callers skip/empty
+ * seats before calling this. Diverges from `seatIndex + 1` when startNumber !== 1.
+ */
+export function displayedSeatNumber(numbering = {}, seatIndex) {
+  const startNumber = Number(numbering.startNumber ?? 1);
+  const base = Number.isFinite(startNumber) ? startNumber : 1;
+  return base + seatIndex;
+}
+
+export function shouldOmitSeatIndex(numbering = {}, seatIndex) {
+  const skip = numbering.skipSeatIndices || [];
+  const empty = numbering.emptySeatIndices || [];
+  return skip.includes(seatIndex) || empty.includes(seatIndex);
+}
+
+export function layoutSeatFullId(sectionName, rowLabel, numbering, seatIndex) {
+  return generateFullId(sectionName, rowLabel, displayedSeatNumber(numbering, seatIndex));
+}
