@@ -12,6 +12,7 @@
 import { User } from "#models/index.js";
 import { hashPassword } from "#utils/hash.js";
 import { ConflictError, UnauthorizedError } from "#utils/errors.js";
+import { publicRegistrationPrivileges } from "./helpers/privilegeFields.js";
 
 /**
  * @param {Object} userData
@@ -20,7 +21,6 @@ import { ConflictError, UnauthorizedError } from "#utils/errors.js";
  * @param {string} userData.password
  * @param {string} userData.name
  * @param {string} userData.phone
- * @param {string} [userData.role='user']
  * @param {string} [userData.title]
  * @param {string} [userData.gender]
  * @param {string} [userData.birthday]
@@ -29,7 +29,7 @@ import { ConflictError, UnauthorizedError } from "#utils/errors.js";
  * @throws {ConflictError}
  */
 export const register = async (userData) => {
-  const { email, username, password, name, phone, role = "user", title, gender, birthday, profileImage } = userData;
+  const { email, username, password, name, phone, title, gender, birthday, profileImage } = userData;
 
   const existingUser = await User.findOne({
     where: {
@@ -63,8 +63,7 @@ export const register = async (userData) => {
     password: hashedPassword,
     name,
     phone,
-    role,
-    status: "active",
+    ...publicRegistrationPrivileges(),
     title,
     gender,
     birthday,
